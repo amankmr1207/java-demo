@@ -1,64 +1,43 @@
+name: Semgrep Full Scan
+
 on:
-  pull_request:
-    branches:
-      - '*'
-  push:
+  workflow_dispatch:
     branches:
       - main
-      - master
-    paths:
-      - .github/workflows/semgrep.yml
   schedule:
-    - cron: '0 0 * * 0'
-
-name: Semgrep Security Scan
+    - cron:  '0 1 * * 6'
 
 jobs:
-  semgrep:
-    name: Security Scan
-    runs-on: ubuntu-20.04
-    env:
-      SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
 
-    container:
-      image: returntocorp/semgrep
+  semgrep-full:
+      runs-on: ubuntu-latest
+      container:
+        image: returntocorp/semgrep
 
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      steps:
 
-      - name: Run Semgrep Security Scan
-        run: |
-          semgrep_result=$(semgrep --json ci)
-          echo "$semgrep_result" > semgrep_results.json
+        # step 1
+        - name: clone application source code
+          uses: actions/checkout@v3
 
-      - name: Display Scan Results
-        run: |
-          cat semgrep_results.json
-          semgrep_levels=$(jq -r '.results[].issue.severity' semgrep_results.json | sort -u)
-          echo "Scan Results Summary:"
-          for level in $semgrep_levels; do
-            level_count=$(jq -r --arg level "$level" '.results | map(select(.issue.severity == $level)) | length' semgrep_results.json)
-            echo "  $level: $level_count issues"
-          done
+        # step 2
+        - name: full scan
+          run: |
+            semgrep \
+              --sarif --output report.sarif \
+              --metrics=off \
+              --config="p/default"
 
-      - name: Set Exit Status Based on Findings
-        run: |
-          semgrep_high_count=$(jq -r '.results | map(select(.issue.severity == "error")) | length' semgrep_results.json)
-          semgrep_medium_count=$(jq -r '.results | map(select(.issue.severity == "warning")) | length' semgrep_results.json)
-          semgrep_low_count=$(jq -r '.results | map(select(.issue.severity == "info")) | length' semgrep_results.json)
+        # step 3
+        - name: save report as pipeline artifact
+          uses: actions/upload-artifact@v3
+          with:
+            name: report.sarif
+            path: report.sarif
 
-          echo "High count: $semgrep_high_count"
-          echo "Medium count: $semgrep_medium_count"
-          echo "Low count: $semgrep_low_count"
-
-          if [ $semgrep_high_count -gt 0 ]; then
-            echo "Semgrep found $semgrep_high_count high-severity issues. Please address them."
-            exit 1
-          elif [ $semgrep_medium_count -gt 0 ]; then
-            echo "Semgrep found $semgrep_medium_count medium-severity issues. Consider reviewing and fixing them."
-            exit 0
-          else
-            echo "Semgrep found $semgrep_low_count low-severity issues. These can be reviewed for best practices."
-            exit 0
-          fi
+        # step 4
+        - name: publish code scanning alerts
+          uses: github/codeql-action/upload-sarif@v2
+          with:
+            sarif_file: report.sarif
+            category: semgrep
