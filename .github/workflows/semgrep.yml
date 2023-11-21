@@ -42,8 +42,8 @@ jobs:
             echo "  $level: $level_count issues"
           done
 
-           - name: Set Exit Status Based on Findings
-        
+      - name: Set Exit Status Based on Findings
+        run: |
           semgrep_high_count=$(jq -r '.results | map(select(.issue.severity == "error")) | length' semgrep_results.json)
           semgrep_medium_count=$(jq -r '.results | map(select(.issue.severity == "warning")) | length' semgrep_results.json)
           semgrep_low_count=$(jq -r '.results | map(select(.issue.severity == "info")) | length' semgrep_results.json)
