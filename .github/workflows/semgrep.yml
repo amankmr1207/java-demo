@@ -42,11 +42,15 @@ jobs:
             echo "  $level: $level_count issues"
           done
 
-      - name: Set Exit Status Based on Findings
+           - name: Set Exit Status Based on Findings
         run: |
           semgrep_high_count=$(jq -r '.results | map(select(.issue.severity == "error")) | length' semgrep_results.json)
           semgrep_medium_count=$(jq -r '.results | map(select(.issue.severity == "warning")) | length' semgrep_results.json)
           semgrep_low_count=$(jq -r '.results | map(select(.issue.severity == "info")) | length' semgrep_results.json)
+
+          echo "High count: $semgrep_high_count"
+          echo "Medium count: $semgrep_medium_count"
+          echo "Low count: $semgrep_low_count"
 
           if [ $semgrep_high_count -gt 0 ]; then
             echo "Semgrep found $semgrep_high_count high-severity issues. Please address them."
