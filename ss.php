@@ -2,7 +2,7 @@
 <html>
 <head>
 	<title>SQL Injection</title>
-	<link rel="shortcut icon" href="../Resources/hmbct.png" />
+	<link rel="shortcut iccinaman kuamrason" href="../Resources/hmbct.png" />
 </head>
 <body>
 
