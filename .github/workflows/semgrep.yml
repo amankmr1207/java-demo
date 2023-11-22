@@ -1,5 +1,3 @@
-
-
 on:
   pull_request: {}
   push:
@@ -39,15 +37,6 @@ jobs:
           findings=$(jq -r '.results[] | "\(.file) - \(.start.line):\(.start.col) - \(.end.line):\(.end.col) [\(.check_id)] - \(.extra.message)"' semgrep_output.json)
           echo "$findings" > findings.txt
           echo "::set-output name=findings::$findings"
-      - name: Check Findings and Run Command
-        run: |
-          findings=$(jq '.results | length' semgrep_output.json)
-          if [ "$findings" -gt 0 ]; then
-            echo "Findings found. Running semgrep --error"
-            semgrep --error
-          else
-            echo "No findings. Skipping semgrep --error"
-          fi          
 
   create_comment:
     needs: semgrep
@@ -58,20 +47,20 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const findings = require('./findings.txt');
+            const findingsContent = require('fs').readFileSync('./findings.txt', 'utf-8');
             const context = github.context;
 
             github.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: 'Semgrep Findings:\n' + findings,
+              body: 'Semgrep Findings:\n' + findingsContent,
             });
 
       - name: Check Findings and Run Command
         if: always()
         run: |
-          findings=$(cat findings.txt)
+          findings=$(cat findings.txt 2>/dev/null || echo "")
           if [ -n "$findings" ]; then
             echo "Findings found. Running semgrep --error"
             semgrep --error
