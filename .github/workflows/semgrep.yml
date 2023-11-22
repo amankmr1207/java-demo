@@ -24,7 +24,7 @@ jobs:
       - name: Run Semgrep
         id: semgrep
         run: |
-          output=$(semgrep scan --json)
+          output=$(semgrep ci --json)
           echo "$output" > semgrep_output.json
           echo "::set-output name=semgrep_output::$output"
 
