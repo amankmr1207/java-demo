@@ -6,6 +6,7 @@ on:
       - master
     paths:
       - .github/workflows/semgrep.yml
+      - '**/*' # Adjust the paths as needed
 
 name: Semgrep
 
@@ -21,10 +22,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Run Semgrep
+      - name: Get changed files
+        id: get_changed_files
+        run: |
+          changed_files=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
+          echo "::set-output name=files::$changed_files"
+
+      - name: Run Semgrep on changed files
         id: semgrep
         run: |
-          output=$(semgrep scan --json)
+          changed_files="${{ steps.get_changed_files.outputs.files }}"
+          if [ -n "$changed_files" ]; then
+            output=$(semgrep -f "$changed_files" --json)
+          else
+            output=$(semgrep scan --json)
+          fi
           echo "$output" > semgrep_output.json
           echo "::set-output name=semgrep_output::$output"
 
