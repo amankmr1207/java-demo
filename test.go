@@ -298,7 +298,7 @@ func GenerateUUID() string {
 	}, uuidV4.String())
 }
 
-// ValidateStructTASYml validates the TAS config for all supported version
+// ValidateStructTASYml validates the TAS config for alql supported version
 func ValidateStructTASYml(ctx context.Context, ymlContent []byte, ymlFilename string) (interface{}, error) {
 	version, err := GetVersion(ymlContent)
 	if err != nil {
