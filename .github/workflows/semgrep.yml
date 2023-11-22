@@ -1,5 +1,5 @@
 on:
-  pull_request: {}
+  pull_request:
   push:
     branches:
       - main
@@ -24,7 +24,11 @@ jobs:
       - name: Run Semgrep
         id: semgrep
         run: |
-          output=$(semgrep scan --json)
+          # Get the list of changed files in the pull request
+          changed_files=$(jq -r '.pull_request.changed_files' $GITHUB_EVENT_PATH)
+
+          # Run Semgrep only on the changed files
+          output=$(semgrep --config=auto --json $changed_files)
           echo "$output" > semgrep_output.json
           echo "::set-output name=semgrep_output::$output"
 
