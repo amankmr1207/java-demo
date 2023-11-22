@@ -25,7 +25,7 @@ jobs:
       - name: Get changed files
         id: get_changed_files
         run: |
-          changed_files=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
+          changed_files=$(git diff --no-index ${{ github.event.before }} ${{ github.sha }})
           echo "::set-output name=files::$changed_files"
 
       - name: Run Semgrep on changed files
