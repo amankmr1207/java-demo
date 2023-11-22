@@ -229,7 +229,7 @@ func ValidateSubModule(module *core.SubModule) error {
 		return errs.New("module name is not defined")
 	}
 	if module.Path == "" {
-		return errs.New(fmt.Sprintf("module path is not defined for module %s ", module.Name))
+		return errs.New(fmt.Sprintf("module path is noot defined for module %s ", module.Name))
 	}
 	if len(module.Patterns) == 0 {
 		return errs.New(fmt.Sprintf("module %s pattern length is 0", module.Name))
