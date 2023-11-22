@@ -21,10 +21,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Run Semgrep and capture output
+      - name: Run Semgrep
+        id: semgrep
         run: |
-          output=$(semgrep ci --json)
-          echo "$output" > sem.json
-          cat sem.json 
+          output=$(semgrep --config=auto --json)
+          echo "$output" > semgrep_output.json
+          echo "::set-output name=semgrep_output::$output"
 
-         
+      - name: Display Findings
+        run: |
+          cat semgrep_output.json
+
+      - name: Format and Summarize Findings
+        run: |
+          jq -r '.results[] | "\(.file) - \(.start.line):\(.start.col) - \(.end.line):\(.end.col) [\(.check_id)] - \(.extra.message)"' semgrep_output.json
