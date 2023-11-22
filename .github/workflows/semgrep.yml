@@ -35,8 +35,9 @@ jobs:
         id: summarize_findings
         run: |
           findings=$(jq -r '.results[] | "\(.file) - \(.start.line):\(.start.col) - \(.end.line):\(.end.col) [\(.check_id)] - \(.extra.message)"' semgrep_output.json)
-          echo "$findings" > findings.txt
+          echo "$findings" > $GITHUB_WORKSPACE/findings.txt
           echo "::set-output name=findings::$findings"
+
 
   create_comment:
     needs: semgrep
