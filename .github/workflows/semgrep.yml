@@ -24,7 +24,7 @@ jobs:
       - name: Run Semgrep
         id: semgrep
         run: |
-          output=$(semgrep ci --json)
+          output=$(semgrep --config=auto --json $(git --no-pager diff --name-only ${{ github.event.before }} ${{ github.sha }}))
           echo "$output" > semgrep_output.json
           echo "::set-output name=semgrep_output::$output"
 
