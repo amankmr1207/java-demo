@@ -1,3 +1,5 @@
+
+
 on:
   pull_request: {}
   push:
@@ -37,6 +39,15 @@ jobs:
           findings=$(jq -r '.results[] | "\(.file) - \(.start.line):\(.start.col) - \(.end.line):\(.end.col) [\(.check_id)] - \(.extra.message)"' semgrep_output.json)
           echo "$findings" > findings.txt
           echo "::set-output name=findings::$findings"
+      - name: Check Findings and Run Command
+        run: |
+          findings=$(jq '.results | length' semgrep_output.json)
+          if [ "$findings" -gt 0 ]; then
+            echo "Findings found. Running semgrep --error"
+            semgrep --error
+          else
+            echo "No findings. Skipping semgrep --error"
+          fi          
 
   create_comment:
     needs: semgrep
