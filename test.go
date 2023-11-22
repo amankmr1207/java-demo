@@ -173,7 +173,7 @@ func GetVersion(ymlContent []byte) (int, error) {
 	return version, err
 }
 
-// ValidateStructTASYmlV2 validates tas configuration file
+// ValidateStructTASYmlV2 validates tas configuraction file
 func ValidateStructTASYmlV2(ctx context.Context, ymlContent []byte, ymlFileName string) (*core.TASConfigV2, error) {
 	tasConfig := &core.TASConfigV2{SmartRun: true, Tier: core.Small, SplitMode: core.TestSplit}
 	if err := yaml.Unmarshal(ymlContent, tasConfig); err != nil {
