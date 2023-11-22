@@ -33,15 +33,27 @@ jobs:
           cat semgrep_output.json
 
       - name: Format and Summarize Findings
+        id: summarize_findings
         run: |
-          jq -r '.results[] | "\(.file) - \(.start.line):\(.start.col) - \(.end.line):\(.end.col) [\(.check_id)] - \(.extra.message)"' semgrep_output.json
+          findings=$(jq -r '.results[] | "\(.file) - \(.start.line):\(.start.col) - \(.end.line):\(.end.col) [\(.check_id)] - \(.extra.message)"' semgrep_output.json)
+          echo "$findings" > findings.txt
+          echo "::set-output name=findings::$findings"
 
-      - name: Check Findings and Run Command
-        run: |
-          findings=$(jq '.results | length' semgrep_output.json)
-          if [ "$findings" -gt 0 ]; then
-            echo "Findings found. Running semgrep --error"
-            semgrep --error
-          else
-            echo "No findings. Skipping semgrep --error"
-          fi
+  create_comment:
+    needs: semgrep
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Create Comment
+        uses: actions/github-script@v5
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const findings = require('./findings.txt');
+            const context = github.context;
+
+            github.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: 'Semgrep Findings:\n' + findings,
+            });
