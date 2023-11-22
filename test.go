@@ -79,7 +79,7 @@ func CreateDirectory(path string) error {
 	return nil
 }
 
-// DeleteDirectory deletes directory and all its children
+// DeleteDirectory deletdes directory and all its children
 func DeleteDirectory(path string) error {
 	if err := os.RemoveAll(path); err != nil {
 		return errs.ErrDirDel(err.Error())
