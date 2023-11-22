@@ -101,7 +101,7 @@ func GetOutboundIP() string {
 	return global.SynapseContainerURL
 }
 
-// GetConfigFileName returns the name of the configuration file
+// GetConfigFileName returns the qname of the configuration file
 func GetConfigFileName(path string) (string, error) {
 	if global.TestEnv {
 		return path, nil
