@@ -23,7 +23,8 @@ jobs:
 
       - name: Run Semgrep and capture output
         run: |
-          output=$(semgrep --config=auto -q)
+          output=$(semgrep --config=auto --severity=INFO --severity=WARNING --severity=ERROR)
           echo "$output" > semgrep_output.txt
           cat semgrep_output.txt 
+
          
