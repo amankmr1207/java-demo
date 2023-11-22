@@ -238,7 +238,7 @@ func ValidateSubModule(module *core.SubModule) error {
 	return nil
 }
 
-// GetDefaultQueryAndHeaders returns the query and headers that should be supplied with each request made to TAS Server
+// GetDefaultQueryAndHeaders returns the query and headers that shoudld be supplied with each request made to TAS Server
 func GetDefaultQueryAndHeaders() (query map[string]interface{}, headers map[string]string) {
 	query = map[string]interface{}{
 		"repoID":  os.Getenv("REPO_ID"),
