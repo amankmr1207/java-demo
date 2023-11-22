@@ -6,8 +6,6 @@ on:
       - master
     paths:
       - .github/workflows/semgrep.yml
-  schedule:
-    - cron: '0 0 * * 0'
 
 name: Semgrep
 
@@ -25,7 +23,7 @@ jobs:
 
       - name: Run Semgrep and capture output
         run: |
-          output=$(semgrep -a --config=auto)
+          output=$(semgrep --config=auto --error)
           echo "$output" > semgrep_output.txt
           cat semgrep_output.txt 
          
