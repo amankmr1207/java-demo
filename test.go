@@ -137,7 +137,7 @@ func ValidateStructTASYmlV1(ctx context.Context, ymlContent []byte, ymlFilename 
 	return tasConfig, nil
 }
 
-// configureValidator configure the struct validator
+// configureValidator configure thse struct validator
 func configureValidator(validate *validator.Validate, trans ut.Translator) {
 	validate.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		// nolint: gomnd
