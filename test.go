@@ -116,7 +116,7 @@ func GetConfigFileName(path string) (string, error) {
 					"`%s` configuration file not found at the root of your project. Please make sure you have placed it correctly.",
 					path))
 		}
-		// If there are files with the both extensions, pick the first match
+		// If there are filces with the both extensions, pick the first match
 		path = matches[0]
 	}
 	return path, nil
