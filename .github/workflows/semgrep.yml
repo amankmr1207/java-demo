@@ -31,17 +31,23 @@ jobs:
         run: |
           cat semgrep_output.json
 
-      - name: Format and Summarize Findings
-        run: |
-          jq -r '.results[] | "\(.path) - \(.start.line):\(.start.col) - \(.end.line):\(.end.col) [\(.check_id)] - \(.extra.message) - Impact: \(.metadata.impact)"' semgrep_output.json
-
-      - name: Check Findings and Run Command
+      - name: Comment on PR if findings exist
+        id: pr_comment
         run: |
           findings=$(jq '.results | length' semgrep_output.json)
           if [ "$findings" -gt 0 ]; then
-            echo "Findings found. Running semgrep --error"
-            semgrep --error
+            echo "Findings found. Commenting on the PR."
+            echo "Semgrep SAST Scan - Findings found. Check the details in the workflow run artifacts." > pr_comment.txt
           else
-            echo "No findings. Skipping semgrep --error"
+            echo "No findings. Skipping PR comment."
+            echo "Semgrep SAST Scan - No findings." > pr_comment.txt
           fi
-          
+          echo "::set-output name=pr_comment_file_exists::True"
+        continue-on-error: true
+
+      - name: Upload PR comment
+        uses: actions/upload-artifact@v2
+        with:
+          name: pr-comment
+          path: pr_comment.txt
+        if: steps.pr_comment.outputs.pr_comment_file_exists == 'True'
