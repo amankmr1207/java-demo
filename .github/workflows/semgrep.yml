@@ -1,9 +1,5 @@
 on:
-  pull_request: {}
-  push:
-    branches:
-      - main
-      - master
+  pull_request:
     paths:
       - .github/workflows/semgrep.yml
 
@@ -38,16 +34,11 @@ jobs:
           if [ "$findings" -gt 0 ]; then
             echo "Findings found. Commenting on the PR."
             echo "Semgrep SAST Scan - Findings found. Check the details in the workflow run artifacts." > pr_comment.txt
+            curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -X POST \
+              -H "Accept: application/vnd.github.v3+json" \
+              -d '{"body": "Semgrep SAST Scan - Findings found. Check the details in the workflow run artifacts."}' \
+              "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.number }}/comments"
           else
             echo "No findings. Skipping PR comment."
-            echo "Semgrep SAST Scan - No findings." > pr_comment.txt
           fi
-          echo "::set-output name=pr_comment_file_exists::True"
-        continue-on-error: true
-
-      - name: Upload PR comment
-        uses: actions/upload-artifact@v2
-        with:
-          name: pr-comment
-          path: pr_comment.txt
-        if: steps.pr_comment.outputs.pr_comment_file_exists == 'True'
