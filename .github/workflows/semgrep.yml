@@ -1,3 +1,5 @@
+
+
 on:
   pull_request: {}
   push:
@@ -35,35 +37,14 @@ jobs:
         id: summarize_findings
         run: |
           findings=$(jq -r '.results[] | "\(.file) - \(.start.line):\(.start.col) - \(.end.line):\(.end.col) [\(.check_id)] - \(.extra.message)"' semgrep_output.json)
-          echo "$findings" > $GITHUB_WORKSPACE/findings.txt
+          echo "$findings" > findings.txt
           echo "::set-output name=findings::$findings"
-
-
-  create_comment:
-    needs: semgrep
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Create Comment
-        uses: actions/github-script@v5
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const findingsContent = require('fs').readFileSync('./findings.txt', 'utf-8');
-
-            github.issues.createComment({
-              owner: github.context.repo.owner,
-              repo: github.context.repo.repo,
-              issue_number: github.context.issue.number,
-              body: 'Semgrep Findings:\n' + findingsContent,
-            });
-
       - name: Check Findings and Run Command
-        if: always()
         run: |
-          findings=$(cat findings.txt 2>/dev/null || echo "")
-          if [ -n "$findings" ]; then
+          findings=$(jq '.results | length' semgrep_output.json)
+          if [ "$findings" -gt 0 ]; then
             echo "Findings found. Running semgrep --error"
             semgrep --error
           else
             echo "No findings. Skipping semgrep --error"
-          fi
+          fi 
