@@ -1,7 +1,10 @@
-
+name: Combined Workflow
 
 on:
-  pull_request: {}
+  pull_request:
+    types:
+      - opened
+      - synchronize
   push:
     branches:
       - main
@@ -9,11 +12,30 @@ on:
     paths:
       - .github/workflows/semgrep.yml
 
-name: Semgrep
-
 jobs:
+  comment-on-pr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '14'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Comment on Pull Request
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node comment-on-pr.js
+
   semgrep:
-    name: Scan
+    name: Semgrep
     runs-on: ubuntu-20.04
     env:
       SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
@@ -21,7 +43,7 @@ jobs:
       image: returntocorp/semgrep
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v2
 
       - name: Run Semgrep
         id: semgrep
@@ -39,6 +61,7 @@ jobs:
           findings=$(jq -r '.results[] | "\(.file) - \(.start.line):\(.start.col) - \(.end.line):\(.end.col) [\(.check_id)] - \(.extra.message)"' semgrep_output.json)
           echo "$findings" > findings.txt
           echo "::set-output name=findings::$findings"
+
       - name: Check Findings and Run Command
         run: |
           findings=$(jq '.results | length' semgrep_output.json)
@@ -47,4 +70,4 @@ jobs:
             semgrep --error
           else
             echo "No findings. Skipping semgrep --error"
-          fi 
+          fi
