@@ -33,7 +33,7 @@ jobs:
 
       - name: Format and Summarize Findings
         run: |
-          jq -r '.results[] | "\(.file) - \(.start.line):\(.start.col) - \(.end.line):\(.end.col) [\(.check_id)] - \(.extra.message)"' semgrep_output.json
+          jq -r '.results[] | "\(.path) - \(.start.line):\(.start.col) - \(.end.line):\(.end.col) [\(.check_id)] - \(.extra.message) - Impact: \(.metadata.impact)"' semgrep_output.json
 
       - name: Check Findings and Run Command
         run: |
@@ -44,3 +44,4 @@ jobs:
           else
             echo "No findings. Skipping semgrep --error"
           fi
+          
