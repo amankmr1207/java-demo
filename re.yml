@@ -1,0 +1,425 @@
+name: Build & Release
+
+on:
+  push:
+    branches:
+      - master
+      - stage
+      - preprod
+
+  workflow_dispatch:
+
+env:
+  MAC_PASS: ${{ secrets.MAC_PASS }}
+  AC_USERNAME: ${{ secrets.AC_USERNAME }}
+  AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID_DEV }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
+  AWS_DEFAULT_REGION: "us-east-1"
+  GH_TOKEN: ${{ secrets.GH_TOKEN }}
+  HE_BEARER_TOKEN: ${{ secrets.HE_BEARER_TOKEN }}
+
+jobs:
+  build-and-sign-windows:
+    environment: ${{ github.ref_name }}
+
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.21.3
+
+      - name: Set up go variables
+        id: config
+        run: |
+          echo $PWD
+          echo "::set-output name=go-build::$(go env GOCACHE)"
+          echo "::set-output name=go-mod::$(go env GOMODCACHE)"
+
+      # Go build cache
+      - name: Go Build Cache
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.config.outputs.go-build }}
+          key: ${{ runner.os }}-go-build-${{ hashFiles('**\go.sum') }}
+
+      # Go mod cache
+      - name: Go Mod Cache
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.config.outputs.go-mod }}
+          key: ${{ runner.os }}-go-mod-${{ hashFiles('**\go.sum') }}
+
+      - name: Build Windows Binary
+        run: |
+          set DOTNET_SKIP_FIRST_TIME_EXPERIENCE=true
+          dotnet tool install --global AzureSignTool --version 4.0.1
+
+          $Env:GOOS = "windows"; $Env:GOARCH = "386"
+          go build -o C:\tunnel\${{ github.sha }}\tunnel\windows\386\LT.exe main.go
+
+          $Env:GOOS = "windows"; $Env:GOARCH = "amd64"
+          go build -o C:\tunnel\${{ github.sha }}\tunnel\windows\amd64\LT.exe main.go
+          AzureSignTool.exe sign --verbose -kvu $env:KEY_VAULT_URL -kvi $env:KEY_VAULT_CLIENT_ID -kvt $env:KEY_VAULT_TENANT_ID -kvs $env:KEY_VAULT_CLIENT_SECRET -kvc LambdaTest -tr http://timestamp.digicert.com -td sha384 C:\tunnel\${{ github.sha }}\tunnel\windows\386\LT.exe C:\tunnel\${{ github.sha }}\tunnel\windows\amd64\LT.exe
+        env:
+          KEY_VAULT_URL: ${{ secrets.KEY_VAULT_URL }}
+          KEY_VAULT_CLIENT_ID: ${{ secrets.KEY_VAULT_CLIENT_ID }}
+          KEY_VAULT_TENANT_ID: ${{ secrets.KEY_VAULT_TENANT_ID }}
+          KEY_VAULT_CLIENT_SECRET: ${{ secrets.KEY_VAULT_CLIENT_SECRET }}
+        
+      - uses: actions/upload-artifact@v3
+        with:
+          name: windows-signed-binaries
+          path: C:\tunnel\${{ github.sha }}
+          if-no-files-found: error
+
+      - name: cleanup data
+        run: |
+          rm C:\tunnel\${{ github.sha }}\ -r -fo
+
+  build-and-release:
+    needs: build-and-sign-windows
+    environment: ${{ github.ref_name }}
+    env:
+      BUCKET: ${{ secrets.BUCKET }}
+      DISTRIBUTION: ${{ secrets.DISTRIBUTION }}
+      HYE_DISTRIBUTION: ${{ secrets.HYE_DISTRIBUTION }}
+
+
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.21.3
+
+      - name: Set up go variables
+        id: config
+        run: |
+          echo $PWD
+          echo "::set-output name=go-build::$(go env GOCACHE)"
+          echo "::set-output name=go-mod::$(go env GOMODCACHE)"
+
+      # Go build cache
+      - name: Go Build Cache
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.config.outputs.go-build }}
+          key: ${{ runner.os }}-go-build-${{ hashFiles('**/go.sum') }}
+
+      # Go mod cache
+      - name: Go Mod Cache
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.config.outputs.go-mod }}
+          key: ${{ runner.os }}-go-mod-${{ hashFiles('**/go.sum') }}
+
+      - uses: actions/download-artifact@v2
+        with:
+          name: windows-signed-binaries
+          path: ~/tunnel/${{ github.sha }}/
+
+      - name: Import Apple certificate for codesigning
+        run: |
+          echo -n "$DEVELOPER_ID_MAC_P12_BASE64" | base64 -d --output $RUNNER_TEMP/developerId_app.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=random_keychain_pswd
+
+          security create-keychain -p $KEYCHAIN_PASSWORD $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p $KEYCHAIN_PASSWORD $KEYCHAIN_PATH
+          security import $RUNNER_TEMP/developerId_app.p12 -P "$DEVELOPER_ID_MAC_P12_PSWD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+        env:
+          DEVELOPER_ID_MAC_P12_BASE64: ${{ secrets.DEVELOPER_ID_MAC_P12_BASE64 }}
+          DEVELOPER_ID_MAC_P12_PSWD: ${{ secrets.DEVELOPER_ID_MAC_P12_PSWD }}
+
+      - name: Build Mac Binary
+        run: |
+          xcrun notarytool store-credentials "notarytool-profile" --apple-id "$AC_USERNAME" --team-id "$APPLE_TEAM_ID" --password "$AC_PASSWORD"
+          go mod tidy
+          config_dir=$(pwd)
+          GOOS=darwin GOARCH=amd64 go build -o LT_amd64 main.go
+          file LT_amd64 
+          GOOS=darwin GOARCH=arm64 go build -o LT_arm64 main.go
+          file LT_arm64
+          lipo -create -output LT LT_amd64 LT_arm64
+          echo 'Code Sign Binary'
+          codesign --force -s "$APP_IDENTITY" -v "LT" --deep --strict --options=runtime --timestamp
+          echo 'Verify Code Sign Binary'
+          codesign -dvv LT
+          ditto -c -k --keepParent "./LT" "LT.zip"
+          echo 'Notarize Binary'
+          xcrun notarytool submit "./LT.zip" --keychain-profile "notarytool-profile" --wait
+          echo 'Verify Notarization'
+          spctl -vvv -a -t open --context context:primary-signature LT
+          file LT
+          chmod +x LT
+          mkdir -p ~/tunnel/${{ github.sha }}/tunnel/darwin/amd64/
+          cp LT ~/tunnel/${{ github.sha }}/tunnel/darwin/amd64/
+          mkdir -p ~/tunnel/${{ github.sha }}/tunnel/darwin/arm64/
+          cp LT ~/tunnel/${{ github.sha }}/tunnel/darwin/arm64/
+          rm LT.zip
+          rm LT
+        env:
+          AC_USERNAME: ${{ secrets.AC_USERNAME }}
+          AC_PASSWORD: ${{ secrets.AC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_IDENTITY: ${{ secrets.APP_IDENTITY }}
+
+      - name: Build Linux Binary
+        run: |
+          OS=$(echo "linux freebsd solaris")
+          ARCH=$(echo "386 amd64 arm64")
+          for os in ${OS}; do
+            for arch in ${ARCH}; do
+              if [ "${os}" = "solaris" ] && ([ "${arch}" = "386" ] || [ "${arch}" = "arm64" ]); then
+                continue
+              fi
+              echo "Building binary for ${os}_${arch}"
+              rm -rf ~/tunnel/${{ github.sha }}/${os}_${arch}
+              GOOS=${os} GOARCH=${arch} go build -o ~/tunnel/${{ github.sha }}/${os}_${arch}/LT main.go
+            done
+          done
+          cat pkg/global/version.go | grep 'BinaryVersion' | awk 'NR==2 {print $4}' | sed 's/"//g' | tee ~/tunnel/${{ github.sha }}/version
+          cp -r dockerfiles/  ~/tunnel/${{ github.sha }}/
+
+      - name: Set Environment For Prod
+        shell: bash
+        if: github.ref == 'refs/heads/master'
+        run: |
+          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID_PROD }}" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}" >> $GITHUB_ENV
+
+      - name: compress
+        run: |
+          brew install md5sha1sum
+          
+          OS=`echo "linux freebsd darwin windows solaris"`
+          ARCH=`echo "386 amd64 arm64"`
+          for os in ${OS}; do
+          for arch in ${ARCH}; do
+
+          if [ "${arch}" = "386" ] && [ "${os}" = "darwin" ]; then
+          continue
+          fi
+          if [ "${os}"  = "windows" ] && [ "${arch}"  = "arm64" ]; then
+          continue
+          fi
+          if [ "${os}" = "solaris" ] && ([ "${arch}" = "386" ] || [ "${arch}" = "arm64" ]); then
+          continue
+          fi
+
+          if [ "${os}" = "darwin" ]; then
+          :
+          elif [ "${os}" = "windows" ]; then
+          :
+          else
+          rm -rf ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}
+          mkdir -p ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}
+          cp ~/tunnel/${{ github.sha }}/${os}_${arch}/LT ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}/
+          fi
+
+          chmod +x ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}/*
+          md5sum ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}/LT* | awk '{print $1}' | tee ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}/latest
+          echo "zipping ${os} - ${arch}"
+          if [ "${os}" = "linux" ]; then
+          zip -j ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}/LT_Linux.zip ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}/LT
+          elif [ "${os}" = "darwin" ]; then
+          zip -j ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}/LT_Mac.zip ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}/LT
+          elif [ "${os}" = "windows" ]; then
+          zip -j ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}/LT_Windows.zip ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}/LT.exe
+          elif [ "${os}" = "solaris" ]; then
+          zip -j ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}/LT_Solaris.zip ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}/LT
+          else
+          zip -j ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}/LT_Freebsd.zip ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}/LT
+          fi
+          done
+          done
+
+      - name: update tunnel config
+        run: |
+          brew install jq
+          aws s3 cp s3://$BUCKET/tunnel/node-tunnel-config-v3.json ~/tunnel/${{ github.sha }}/tunnel/node-tunnel-config-v3.json
+          OS=$(echo "linux freebsd mac win")
+          ARCH=$(echo "386 amd64")
+          for os in ${OS}; do
+          for arch in ${ARCH}; do
+          if [ "${arch}" = "386" ] && [ "${os}" = "mac" ]; then
+          continue
+          fi
+          if [ "${os}" = "mac" ]; then
+          newhash=$(cat ~/tunnel/${{ github.sha }}/tunnel/darwin/${arch}/latest)
+          elif [ "${os}" = "win" ]; then
+          newhash=$(cat ~/tunnel/${{ github.sha }}/tunnel/windows/${arch}/latest)
+          else
+          newhash=$(cat ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}/latest)
+          fi
+          bit_size=64
+          if [ "${arch}" = "386" ]; then
+          bit_size=32
+          fi
+          #  newhash=$(md5sum ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}bit/LT* | awk '{print $1}' )
+          oldhash=$(cat ~/tunnel/${{ github.sha }}/tunnel/node-tunnel-config-v3.json | jq '."binaryLinks"."'$os'"."'$bit_size'bit"."hash"' | sed 's/"//g' )
+          echo "${arch} - ${os} $newhash"
+          sed -i.bak "s/$oldhash/$newhash/" ~/tunnel/${{ github.sha }}/tunnel/node-tunnel-config-v3.json && rm ~/tunnel/${{ github.sha }}/tunnel/node-tunnel-config-v3.json.bak
+          done
+          done
+          cat ~/tunnel/${{ github.sha }}/tunnel/node-tunnel-config-v3.json
+          aws s3 cp ~/tunnel/${{ github.sha }}/tunnel/node-tunnel-config-v3.json s3://$BUCKET/tunnel/node-tunnel-config-v3.json
+          rm ~/tunnel/${{ github.sha }}/tunnel/node-tunnel-config-v3.json
+          # update new json
+          aws s3 cp s3://$BUCKET/tunnel/node-tunnel-config-v3-latest.json ~/tunnel/${{ github.sha }}/tunnel/node-tunnel-config-v3-latest.json
+          for os in ${OS}; do
+          for arch in ${ARCH}; do
+          if [ "${arch}" = "386" ] && [ "${os}" = "mac" ]; then
+          continue
+          fi
+          bit_size=64
+          if [ "${arch}" = "386" ]; then
+          bit_size=32
+          fi
+          if [ "${os}" = "mac" ]; then
+          newhash=$(cat ~/tunnel/${{ github.sha }}/tunnel/darwin/${arch}/latest)
+          elif [ "${os}" = "win" ]; then
+          newhash=$(cat ~/tunnel/${{ github.sha }}/tunnel/windows/${arch}/latest)
+          else
+          newhash=$(cat ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}/latest)
+          fi
+          oldhash=$(cat ~/tunnel/${{ github.sha }}/tunnel/node-tunnel-config-v3-latest.json | jq '."binaryLinks"."'$os'"."v3"."'$bit_size'bit"."hash"' | sed 's/"//g' )
+          sed -i.bak "s/$oldhash/$newhash/" ~/tunnel/${{ github.sha }}/tunnel/node-tunnel-config-v3-latest.json && rm ~/tunnel/${{ github.sha }}/tunnel/node-tunnel-config-v3-latest.json.bak
+          done
+          done
+          cat ~/tunnel/${{ github.sha }}/tunnel/node-tunnel-config-v3-latest.json
+          aws s3 cp ~/tunnel/${{ github.sha }}/tunnel/node-tunnel-config-v3-latest.json s3://$BUCKET/tunnel/node-tunnel-config-v3-latest.json
+          rm ~/tunnel/${{ github.sha }}/tunnel/node-tunnel-config-v3-latest.json
+
+      - name: sync and invalidate
+        env:
+          CF_ZONE: ${{ secrets.CF_ZONE }}
+          CF_EMAIL: ${{ secrets.CF_EMAIL }}
+          CF_AUTH_KEY: ${{ secrets.CF_AUTH_KEY }}
+          CF_LT_HOST: ${{ secrets.CF_LT_HOST }}
+        run: |
+          OS=`echo "linux freebsd darwin windows solaris"`
+          ARCH=`echo "386 amd64"`
+          for os in ${OS}; do
+          for arch in ${ARCH}; do
+          if [ "${arch}" = "386" ] && [ "${os}" = "darwin" ]; then
+          continue
+          fi
+          if [ "${arch}" = "386" ] && [ "${os}" = "solaris" ]; then
+          continue
+          fi
+          bit_size=64bit
+          if [ "${arch}" = "386" ]; then
+          bit_size=32bit
+          fi
+          cp -R ~/tunnel/${{ github.sha }}/tunnel/${os}/${arch}/ ~/tunnel/${{ github.sha }}/tunnel/${os}/${bit_size}
+          done
+          done
+
+          mv ~/tunnel/${{ github.sha }}/tunnel/darwin ~/tunnel/${{ github.sha }}/tunnel/mac
+          aws s3 cp ~/tunnel/${{ github.sha }}/tunnel/ s3://$BUCKET/tunnel/v3/ --recursive --acl public-read
+
+          invalidateid=$(aws cloudfront create-invalidation --distribution-id $DISTRIBUTION --paths "/tunnel/*" | grep "Id" | cut -d '"' -f 4)
+          echo "Distribution Id $DISTRIBUTION" | sed 's/./& /g'
+          echo $invalidateid
+          aws cloudfront wait invalidation-completed --id $invalidateid --distribution-id $DISTRIBUTION
+
+          invalidateid_hye=$(aws cloudfront create-invalidation --distribution-id $HYE_DISTRIBUTION --paths "/tunnel/*" | grep "Id" | cut -d '"' -f 4)
+          echo $invalidateid_hye
+          aws cloudfront wait invalidation-completed --id $invalidateid_hye --distribution-id $HYE_DISTRIBUTION
+
+          echo "Invalidating Cloudfare Cache"
+          curl -X POST "https://api.cloudflare.com/client/v4/zones/${{ env.CF_ZONE }}/purge_cache" -H "X-Auth-Email: ${{ env.CF_EMAIL }}" -H "X-Auth-Key: ${{ env.CF_AUTH_KEY }}" -H "Content-Type: application/json" --data '{"hosts":["${{ env.CF_LT_HOST }}"]}'
+
+      - name: update database and trigger jobs
+        env:
+          API_AUTH_TOKEN: ${{ secrets.API_AUTH_TOKEN }}
+          VERSION_BUMP_ENDPOINT: ${{ secrets.VERSION_BUMP_ENDPOINT }}
+          HYE_VERSION_BUMP_ENDPOINT: ${{ secrets.HYE_VERSION_BUMP_ENDPOINT }}
+        run: |
+          BINARY_VERSION=$(head -1 ~/tunnel/${{ github.sha }}/version)
+          curl --fail -X PUT ${{ env.VERSION_BUMP_ENDPOINT }} -H "Authorization: ${{ env.API_AUTH_TOKEN }}" --data "{\"binaryVersion\": \"$BINARY_VERSION\", \"configKey\": \"client_version\"}"
+          curl -k --fail -X PUT ${{ env.HYE_VERSION_BUMP_ENDPOINT }} -H "Authorization: ${{ env.API_AUTH_TOKEN }}" --data "{\"binaryVersion\": \"$BINARY_VERSION\", \"configKey\": \"client_version\"}"
+
+          MAC_BINARY_HASH=$(shasum -a 256 ~/tunnel/${{ github.sha }}/tunnel/mac/64bit/LT_Mac.zip | awk '{print $1}')
+          echo "Updating SHA256 hash of mac zip $MAC_BINARY_HASH"
+          curl --fail -X PUT ${{ env.VERSION_BUMP_ENDPOINT }} -H "Authorization: ${{ env.API_AUTH_TOKEN }}" --data "{\"binaryVersion\": \"$MAC_BINARY_HASH\", \"configKey\": \"mac_client_hash\"}"
+
+          # echo 'Triggering UnderPass Job'
+          if [ ${{ github.ref_name }} == "stage" ]; then
+            echo "Calling Underpass job stage"
+            curl --fail -X POST "https://api.github.com/repos/LambdaTestIncPrivate/UnderPass/actions/workflows/release.yml/dispatches" -H "Authorization:Bearer $GH_TOKEN" -d "{\"ref\":\"stage\"}"          
+          else
+            echo "Calling Underpass job ${{ github.ref_name }}"
+            curl --fail -X POST "https://api.github.com/repos/LambdaTestIncPrivate/UnderPass/actions/workflows/release.yml/dispatches" -H "Authorization:Bearer $GH_TOKEN" -d "{\"ref\":\"${{ github.ref_name }}\"}"          
+          fi
+
+      - name: cleanup data
+        run: |
+          rm -rf ~/tunnel/${{ github.sha }}/*
+
+      - name: Send Slack Notifications
+        run: |
+          color="good"
+          if ${{ job.status }} != "success"; then
+            color="danger"
+          fi
+          curl -X POST ${{ env.SLACK_WEBHOOK_URL }} -H "Content-type: application/json" --data "{\"channel\": \"tunnel-alerts\",\"attachments\": [{\"title\": \"Burrow CI CD\",\"color\": \"$color\",\"text\": \"Burrow package updated for ${{ github.ref_name }} environment\", \"fields\": [{\"title\": \"commit\", \"value\": \"${{ github.sha }}\"},{\"title\": \"author\", \"value\": \"${{ github.event.pusher.name }}\"}]}]}"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  build-and-push-image:
+    needs: [build-and-release]
+    env:
+      DEFAULT_DOCKER_IMAGE: lambdatest/tunnel
+      DOCKER_PLATFORMS: linux/amd64,linux/arm64
+    runs-on: ubuntu-latest
+    if: contains(github.ref, 'master')
+    strategy:
+      matrix:
+        os: ['ubuntu', 'alpine']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+        with:
+          version: latest
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v2
+        with:
+          push: true
+          tags: "${{ env.DEFAULT_DOCKER_IMAGE }}:${{ matrix.os != 'ubuntu' && format('{0}', matrix.os) || 'latest' }}"
+          context: .
+          file: "dockerfiles/${{ matrix.os }}/Dockerfile"
+          platforms: ${{env.DOCKER_PLATFORMS}}
+
+      - uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow,job,took
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        if: always()
